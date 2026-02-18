@@ -2,27 +2,57 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Abductive MCTS</title>
+    <title>Chess Research Lab</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
 <div class="dashboard-grid">
-    <div class="chess-module">
-        <div class="board-section">
-            <div id="board"></div>
+    <div class="main-stage">
+        <div class="board-container">
+            <div id="board" style="width: 480px"></div>
         </div>
-        
-        <div class="analysis-section">
-            <div class="analysis-header">Live Analysis Log</div>
-            <div class="moves-container" id="moves-table">
-                </div>
+
+        <div class="sidebar-container">
+            <div class="analysis-card log-card">
+                <div class="res-label">LIVE_ANALYSIS_LOG</div>
+                <div class="moves-container" id="moves-table"></div>
+            </div>
+
+            <div class="analysis-card pv-card">
+                <div class="res-label">TOP_SEARCH_LINES (PV)</div>
+                <div id="pv-table" class="pv-table"></div>
+            </div>
+
+            <div class="analysis-card decision-stats-card">
+                <div class="res-label">ENGINE_DECISION_STATS</div>
+                <table class="minimal-table">
+                    <tr><td>Win Prob</td><td id="win-rate">50%</td></tr>
+                    <tr><td>Total Sims</td><td id="sim-count">0</td></tr>
+                    <tr><td>Search Depth</td><td><span id="depth-val">0</span> plies</td></tr>
+                </table>
+            </div>
         </div>
     </div>
 
-    <div class="research-workspace" id="workspace"></div>
+    <div class="research-row">
+        <div class="analysis-card health-card">
+            <div class="res-label">SEARCH_FOCUS</div>
+            <div id="heatmap-grid" class="heatmap-grid"></div>
+        </div>
+
+        <div class="analysis-card chart-card-wide">
+            <div class="res-label">WIN_PROBABILITY_HISTORY</div>
+            <div class="chart-inner"><canvas id="evalChart"></canvas></div>
+        </div>
+
+        <div class="analysis-card chart-card-wide">
+            <div class="res-label">SEARCH_DEPTH_HISTORY</div>
+            <div class="chart-inner"><canvas id="depthChart"></canvas></div>
+        </div>
+    </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>

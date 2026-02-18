@@ -1,8 +1,5 @@
-rebuild chess engine
+lets implement mcts for chess
+- the training?
+- dont use training use state estimators
 
-alphazero
-
-lets start by making tic tac toe mcts
-
-mcts
-alphazero
+want some sort of visuals on the page for whats happening

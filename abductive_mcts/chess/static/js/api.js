@@ -9,6 +9,14 @@ const API = {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ uci })
         });
+        if (!r.ok) {
+            console.error("Move failed", await r.text());
+            return { ok: false };
+        }
+        return r.json();
+    },
+    async engineMove() {
+        const r = await fetch("/engine_move", { method: "POST" });
         return r.json();
     },
     async goto(view) {
