@@ -1,0 +1,116 @@
+:root {
+    --bg-main: #ffffff;
+    --border-light: #f3f3f3; /* Used only for subtle row separation */
+    --text-primary: #312e2b;
+    --text-secondary: #959492;
+    
+    /* Muted Chess.com Palette */
+    --cc-selection: rgba(255, 255, 51, 0.4); 
+    --cc-last-move: rgba(172, 188, 50, 0.3); 
+    --move-active: #f1f1f1;
+    --accent-bar: #d4d4d4;
+}
+
+body, html {
+    margin: 0; padding: 0;
+    height: 100%; width: 100%;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    font-family: -apple-system, system-ui, sans-serif;
+    overflow: hidden;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    height: 100vh;
+}
+
+/* TUCKED MODULE (No wrapper borders) */
+.chess-module {
+    display: flex;
+    padding: 20px; /* Slight increase for breathing room */
+    gap: 24px;
+    height: fit-content;
+    background: transparent;
+}
+
+.board-section {
+    width: 380px;
+}
+
+.analysis-section {
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    /* Removed border-left here */
+}
+
+.analysis-header {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+    padding-bottom: 12px;
+    text-transform: uppercase;
+    /* Removed border-bottom here for total floating look */
+}
+
+.moves-container {
+    height: 380px;
+    overflow-y: auto;
+    font-size: 13px;
+}
+
+.move-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 1fr;
+    padding: 1px 0;
+}
+
+.m-num { 
+    color: #cecdcb; 
+    font-size: 11px; 
+    align-self: center;
+    display: flex;
+    align-items: center;
+}
+
+.m-cell {
+    cursor: pointer;
+    padding: 10px 8px; /* Slightly taller for a cleaner touch */
+    border-radius: 4px;
+    transition: background 0.1s ease;
+}
+
+.m-cell:hover { background: #f9f9f9; }
+.m-cell.active { background: var(--move-active); font-weight: 600; }
+
+/* TIME BAR */
+.time-bar-bg {
+    height: 2px;
+    background: #f6f6f6;
+    width: 100%;
+    margin-top: 6px;
+    border-radius: 1px;
+}
+.time-bar-fill { 
+    height: 100%; 
+    background: var(--accent-bar); 
+    border-radius: 1px;
+}
+
+/* BOARD HIGHLIGHTS */
+.sq-sel { background-color: var(--cc-selection) !important; }
+.sq-last { background-color: var(--cc-last-move) !important; }
+.sq-dot {
+    background-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.08) 18%, transparent 20%);
+}
+
+/* SCROLLBAR (Ultra-thin) */
+.moves-container::-webkit-scrollbar { width: 3px; }
+.moves-container::-webkit-scrollbar-thumb { background: #eee; border-radius: 10px; }
+
+.research-workspace {
+    background: transparent;
+}

@@ -1,42 +1,35 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Chess</title>
-
-  <link rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-
-  <!-- Classic global Chess constructor -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-
-  <link rel="stylesheet" href="/static/style.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Abductive MCTS</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
-
 <body>
-  <div class="page">
 
-    <div class="board-wrap">
-      <div id="board"></div>
+<div class="dashboard-grid">
+    <div class="chess-module">
+        <div class="board-section">
+            <div id="board"></div>
+        </div>
+        
+        <div class="analysis-section">
+            <div class="analysis-header">Live Analysis Log</div>
+            <div class="moves-container" id="moves-table">
+                </div>
+        </div>
     </div>
 
-    <div class="panel">
+    <div class="research-workspace" id="workspace"></div>
+</div>
 
-      <div class="movesbox" id="moves"></div>
-
-      <div class="turnrow">
-        <div id="turnbox" class="turnbox"></div>
-        <div id="turntext" class="turntext"></div>
-      </div>
-
-    </div>
-
-  </div>
-
-  <script src="/static/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/ui.js"></script>
+<script src="/static/js/main.js"></script>
 </body>
 </html>
