@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Chess</title>
+
+  <link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
+  <!-- Classic global Chess constructor -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+  <div class="page">
+
+    <div class="board-wrap">
+      <div id="board"></div>
+    </div>
+
+    <div class="panel">
+
+      <div class="movesbox" id="moves"></div>
+
+      <div class="turnrow">
+        <div id="turnbox" class="turnbox"></div>
+        <div id="turntext" class="turntext"></div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

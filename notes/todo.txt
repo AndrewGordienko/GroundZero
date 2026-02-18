@@ -1,0 +1,8 @@
+rebuild chess engine
+
+alphazero
+
+lets start by making tic tac toe mcts
+
+mcts
+alphazero

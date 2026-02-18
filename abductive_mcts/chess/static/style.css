@@ -1,0 +1,82 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #ffffff;
+  font-family: Cambria, Georgia, serif;
+}
+
+.page {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 40px;
+  gap: 40px;
+}
+
+/* BOARD LEFT */
+
+.board-wrap {
+  flex: 0 0 auto;
+}
+
+#board {
+  width: 600px;
+}
+
+/* RIGHT PANEL */
+
+.panel {
+  width: 350px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* MOVE TABLE */
+
+.movesbox {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 8px;
+  height: 220px;
+  overflow-y: auto;
+  font-size: 16px;
+}
+
+.moverow {
+  display: grid;
+  grid-template-columns: 40px 1fr 1fr;
+  padding: 4px 6px;
+}
+
+.moverow:nth-child(even) {
+  background: #f7f7f7;
+}
+
+.move-num {
+  color: #777;
+}
+
+.move {
+  text-align: left;
+}
+
+.move.current {
+  background: #eaeaea;
+}
+
+/* TURN ROW */
+
+.turnrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+
+.turnbox {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #999;
+}
