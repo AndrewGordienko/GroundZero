@@ -1,4 +1,8 @@
-const API = {
+/**
+ * API Service for GroundZero
+ * Handles all network communication with the Flask backend.
+ */
+export const API = {
     async getState() {
         const r = await fetch("/state");
         return r.json();

@@ -4,8 +4,11 @@ import chess
 import time
 from flask import Flask, request, jsonify, render_template
 
-# Ensure MCTS modules are discoverable
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Updated: Reach up TWO levels to find the root groundzero directory 
+# so 'import mcts' works correctly.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
 
 from mcts.evaluator import MaterialEvaluator
 from mcts.search import MCTS
@@ -18,8 +21,8 @@ engine = MCTS(evaluator)
 STATE = {
     "moves_uci": [],
     "move_times": [],
-    "history_evals": [0.5], # Start at 50%
-    "history_depths": [0],   # Track depth for every move
+    "history_evals": [0.5], 
+    "history_depths": [0],   
     "view": 0,
     "last_ts": None,
     "last_stats": {
@@ -95,7 +98,6 @@ def process_move(uci, engine_eval=None, engine_depth=None):
     dt = max(0.1, now - STATE["last_ts"]) if STATE["last_ts"] else 0.5
     STATE["last_ts"] = now
 
-    # Handle branching
     if STATE["view"] < len(STATE["moves_uci"]):
         STATE["moves_uci"] = STATE["moves_uci"][:STATE["view"]]
         STATE["move_times"] = STATE["move_times"][:STATE["view"]]
@@ -106,7 +108,6 @@ def process_move(uci, engine_eval=None, engine_depth=None):
     STATE["moves_uci"].append(uci)
     STATE["move_times"].append(dt)
     
-    # Store Eval & Depth
     val = engine_eval if engine_eval is not None else (STATE["last_stats"]["win_prob"] / 100.0)
     dep = engine_depth if engine_depth is not None else STATE["last_stats"]["depth"]
     
@@ -134,7 +135,7 @@ def goto():
         "moves_san": san_list(), "move_times": STATE["move_times"],
         "history_evals": STATE["history_evals"],
         "history_depths": STATE["history_depths"],
-        "last_move": {"from": u[:2], "to": u[2:4]} if u else None,
+        "last_move": {"from": u[:2], "to": u[2:4]} if view > 0 else None,
         "engine_stats": STATE["last_stats"]
     })
 
