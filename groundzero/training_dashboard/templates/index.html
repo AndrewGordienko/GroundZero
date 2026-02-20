@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>groundzero | Reasoning Lab</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+</head>
+<body>
+
+<div class="dashboard-grid">
+    <div class="header">
+        <div class="res-label">SYSTEM_STATUS: <span id="system-status" style="color: #222;">ACTIVE</span></div>
+        <div class="res-label">BUFFER_SIZE: <span id="buffer-count">0</span> .NPZ</div>
+    </div>
+
+    <div class="main-stage">
+        <div class="board-container">
+            <div class="res-label">LIVE_INSPECTION: WORKER_<span id="active-worker-id">0</span></div>
+            <div id="board" style="width: 480px"></div>
+        </div>
+
+        <div class="sidebar-container">
+            <div class="res-label">ACTIVE_ACTORS</div>
+            <div id="worker-list" class="worker-list">
+                </div>
+
+            <div class="analysis-card decision-stats-card">
+                <div class="res-label">SELECTED_WORKER_STATS</div>
+                <table class="minimal-table">
+                    <tr><td>Turn</td><td id="stat-turn">-</td></tr>
+                    <tr><td>Move Count</td><td id="stat-moves">0</td></tr>
+                    <tr><td>Search Depth</td><td><span id="stat-depth">0</span> plies</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/main.js"></script>
+</body>
+</html>

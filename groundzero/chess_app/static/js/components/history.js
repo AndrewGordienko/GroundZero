@@ -4,12 +4,19 @@ export class MoveHistory {
         this.onGoto = onGoto;
     }
 
-    render(moves, times, currentView) {
+    render(moves = [], times = [], currentView = 0) {
         if (!this.container) return;
+        
+        // Safety check: ensure moves and times are iterables
+        const safeMoves = moves || [];
+        const safeTimes = times || [];
+        
         this.container.innerHTML = "";
-        const maxT = Math.max(...times, 0.5);
+        
+        // Fix: Math.max(...[]) results in -Infinity. Fallback to 0.5.
+        const maxT = safeTimes.length > 0 ? Math.max(...safeTimes, 0.5) : 0.5;
 
-        for (let i = 0; i < moves.length; i += 2) {
+        for (let i = 0; i < safeMoves.length; i += 2) {
             const row = document.createElement("div");
             row.className = "move-row";
             
@@ -19,8 +26,8 @@ export class MoveHistory {
 
             row.append(
                 num,
-                this.createCell(moves[i], times[i], maxT, i + 1, currentView),
-                this.createCell(moves[i + 1], times[i + 1], maxT, i + 2, currentView)
+                this.createCell(safeMoves[i], safeTimes[i], maxT, i + 1, currentView),
+                this.createCell(safeMoves[i + 1], safeTimes[i + 1], maxT, i + 2, currentView)
             );
             this.container.appendChild(row);
         }
@@ -30,6 +37,8 @@ export class MoveHistory {
     createCell(san, time, maxT, ply, current) {
         const cell = document.createElement("div");
         cell.className = `m-cell ${current === ply ? 'active' : ''}`;
+        
+        // If there's no move (e.g., Black hasn't moved yet in the pair), return empty cell
         if (!san) return cell;
 
         cell.onclick = () => this.onGoto(ply);
@@ -41,7 +50,10 @@ export class MoveHistory {
         bar.className = "time-bar-bg";
         const fill = document.createElement("div");
         fill.className = "time-bar-fill";
-        fill.style.width = `${Math.min(100, (time / maxT) * 100)}%`;
+        
+        // Ensure time is a number before calculating width
+        const safeTime = time || 0;
+        fill.style.width = `${Math.min(100, (safeTime / maxT) * 100)}%`;
         
         bar.appendChild(fill);
         cell.append(sanText, bar);

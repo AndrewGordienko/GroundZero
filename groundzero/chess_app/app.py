@@ -1,54 +1,63 @@
-import sys
-import os
-import chess
-import time
+import sys, os, chess, time, torch
 from flask import Flask, request, jsonify, render_template
 
-# Updated: Reach up TWO levels to find the root groundzero directory 
-# so 'import mcts' works correctly.
+# Setup paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
+root_dir = os.path.dirname(current_dir)
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
 
-from mcts.evaluator import MaterialEvaluator
 from mcts.search import MCTS
+from mcts.evaluator import MaterialEvaluator # The heuristic evaluator
+from alphazero.evaluator import AlphaZeroEvaluator # The neural evaluator
 
 app = Flask(__name__)
 
-evaluator = MaterialEvaluator() 
+# --- Modular Engine Initialization ---
+device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+# TO SWAP: Comment out AlphaZero and uncomment MaterialEvaluator
+evaluator = AlphaZeroEvaluator(device=device) 
+# evaluator = MaterialEvaluator() 
+
 engine = MCTS(evaluator)
+# -------------------------------------
+
+GLOBAL_BOARD = chess.Board()
 
 STATE = {
-    "moves_uci": [],
     "move_times": [],
     "history_evals": [0.5], 
     "history_depths": [0],   
     "view": 0,
     "last_ts": None,
     "last_stats": {
-        "win_prob": 50.0,
-        "simulations": 0,
-        "depth": 0,
-        "top_lines": []
+        "win_prob": 50.0, "simulations": 0, "depth": 0, "top_lines": []
     } 
 }
 
-def rebuild_board():
-    b = chess.Board()
-    for u in STATE["moves_uci"][:STATE["view"]]:
-        b.push_uci(u)
-    return b
-
-def san_list():
-    b = chess.Board()
+def get_san_list():
+    temp_b = chess.Board()
     out = []
-    for u in STATE["moves_uci"]:
-        try:
-            mv = chess.Move.from_uci(u)
-            out.append(b.san(mv))
-            b.push(mv)
-        except: continue
+    for m in GLOBAL_BOARD.move_stack:
+        out.append(temp_b.san(m))
+        temp_b.push(m)
     return out
+
+def get_common_state():
+    """Helper to package the state keys the frontend always needs."""
+    u = GLOBAL_BOARD.move_stack[STATE["view"]-1] if STATE["view"] > 0 else None
+    return {
+        "fen": GLOBAL_BOARD.fen(),
+        "turn": "w" if GLOBAL_BOARD.turn else "b",
+        "moves_san": get_san_list(),
+        "move_times": STATE["move_times"],
+        "history_evals": STATE["history_evals"],
+        "history_depths": STATE["history_depths"],
+        "last_move": {"from": u.uci()[:2], "to": u.uci()[2:4]} if u else None,
+        "view": STATE["view"],
+        "engine_stats": STATE["last_stats"]
+    }
 
 @app.route("/")
 def index():
@@ -56,19 +65,7 @@ def index():
 
 @app.get("/state")
 def get_state():
-    b = rebuild_board()
-    u = STATE["moves_uci"][STATE["view"]-1] if STATE["view"] > 0 else None
-    return jsonify({
-        "fen": b.fen(),
-        "turn": "w" if b.turn else "b",
-        "moves_san": san_list(),
-        "move_times": STATE["move_times"],
-        "history_evals": STATE["history_evals"],
-        "history_depths": STATE["history_depths"],
-        "last_move": {"from": u[:2], "to": u[2:4]} if u else None,
-        "view": STATE["view"],
-        "engine_stats": STATE["last_stats"]
-    })
+    return jsonify(get_common_state())
 
 @app.post("/move")
 def make_move():
@@ -77,35 +74,36 @@ def make_move():
 
 @app.post("/engine_move")
 def engine_move():
-    b = rebuild_board()
-    if b.is_game_over():
+    if GLOBAL_BOARD.is_game_over():
         return jsonify({"ok": False}), 400
-
-    best_move, stats = engine.search(b)
+    
+    best_move, stats = engine.search(GLOBAL_BOARD)
     STATE["last_stats"] = stats
-    return process_move(best_move.uci(), engine_eval=stats["win_prob"] / 100.0, engine_depth=stats["depth"])
+    return process_move(best_move.uci(), 
+                        engine_eval=stats["win_prob"] / 100.0, 
+                        engine_depth=stats["depth"])
 
 def process_move(uci, engine_eval=None, engine_depth=None):
-    b = rebuild_board()
     try:
         mv = chess.Move.from_uci(uci)
     except: return jsonify({"ok": False}), 400
         
-    if mv not in b.legal_moves:
+    if mv not in GLOBAL_BOARD.legal_moves:
         return jsonify({"ok": False}), 400
 
     now = time.time()
     dt = max(0.1, now - STATE["last_ts"]) if STATE["last_ts"] else 0.5
     STATE["last_ts"] = now
 
-    if STATE["view"] < len(STATE["moves_uci"]):
-        STATE["moves_uci"] = STATE["moves_uci"][:STATE["view"]]
+    # Handle history truncation if user is at an old move
+    if STATE["view"] < len(GLOBAL_BOARD.move_stack):
+        while len(GLOBAL_BOARD.move_stack) > STATE["view"]:
+            GLOBAL_BOARD.pop()
         STATE["move_times"] = STATE["move_times"][:STATE["view"]]
         STATE["history_evals"] = STATE["history_evals"][:STATE["view"] + 1]
         STATE["history_depths"] = STATE["history_depths"][:STATE["view"] + 1]
 
-    b.push(mv)
-    STATE["moves_uci"].append(uci)
+    GLOBAL_BOARD.push(mv)
     STATE["move_times"].append(dt)
     
     val = engine_eval if engine_eval is not None else (STATE["last_stats"]["win_prob"] / 100.0)
@@ -113,31 +111,29 @@ def process_move(uci, engine_eval=None, engine_depth=None):
     
     STATE["history_evals"].append(val)
     STATE["history_depths"].append(dep)
-    STATE["view"] = len(STATE["moves_uci"])
+    STATE["view"] = len(GLOBAL_BOARD.move_stack)
     
-    return jsonify({
-        "ok": True, "fen": b.fen(), "moves_san": san_list(), 
-        "move_times": STATE["move_times"], "history_evals": STATE["history_evals"],
-        "history_depths": STATE["history_depths"],
-        "last_move": {"from": uci[:2], "to": uci[2:4]}, "view": STATE["view"],
-        "engine_stats": STATE["last_stats"]
-    })
+    res = get_common_state()
+    res["ok"] = True
+    return jsonify(res)
 
 @app.post("/goto")
 def goto():
     data = request.get_json(force=True)
-    view = max(0, min(int(data.get("view", 0)), len(STATE["moves_uci"])))
-    STATE["view"] = view
-    b = rebuild_board()
-    u = STATE["moves_uci"][view-1] if view > 0 else None
-    return jsonify({
-        "ok": True, "fen": b.fen(), "view": STATE["view"], 
-        "moves_san": san_list(), "move_times": STATE["move_times"],
-        "history_evals": STATE["history_evals"],
-        "history_depths": STATE["history_depths"],
-        "last_move": {"from": u[:2], "to": u[2:4]} if view > 0 else None,
-        "engine_stats": STATE["last_stats"]
-    })
+    target = max(0, min(int(data.get("view", 0)), len(GLOBAL_BOARD.move_stack)))
+    
+    STATE["view"] = target
+    # Sync board for rendering correct FEN
+    temp_board = chess.Board()
+    for m in GLOBAL_BOARD.move_stack[:target]:
+        temp_board.push(m)
+    
+    # We don't pop GLOBAL_BOARD here because we want to keep history
+    # just return the common state with the temporary FEN
+    res = get_common_state()
+    res["fen"] = temp_board.fen()
+    res["ok"] = True
+    return jsonify(res)
 
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
