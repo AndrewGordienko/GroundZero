@@ -17,7 +17,13 @@
         <div class="res-label">SYSTEM_STATUS: <span id="system-status" style="color: #111;">ACTIVE</span></div>
         <div class="res-label">BUFFER_SIZE: <span id="buffer-count">0</span> .NPZ</div>
     </div>
+    
     <div class="main-stage">
+        <div class="gallery-sidebar">
+            <div class="res-label">RECENT_GAMES</div>
+            <div id="game-gallery" class="game-gallery"></div>
+        </div>
+
         <div class="board-container">
             <div class="res-label">LIVE_INSPECTION: WORKER_<span id="active-worker-id">0</span></div>
             <div id="board" style="width: 480px"></div>
@@ -28,6 +34,7 @@
                 <button id="live-view" class="active">LIVE</button>
             </div>
         </div>
+
         <div class="sidebar-container">
             <div class="res-label">ACTIVE_ACTORS</div>
             <div id="worker-list" class="worker-list"></div>
@@ -44,10 +51,13 @@
             </div>
         </div>
     </div>
+
     <div class="research-grid">
         <div class="analysis-card chart-card">
-            <div class="res-label">SEARCH_FOCUS_HEATMAP</div>
-            <div id="heatmap-grid" class="heatmap-grid"></div>
+            <div class="res-label">OPENING_EXPLORATION_BREADTH</div>
+            <div class="chart-inner">
+                <canvas id="openingChart"></canvas>
+            </div>
         </div>
         <div class="analysis-card chart-card">
             <div class="res-label">GAME_PHASE_TIME</div>

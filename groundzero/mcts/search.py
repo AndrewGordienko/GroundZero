@@ -11,9 +11,9 @@ class MCTS:
     def __init__(self, evaluator):
         self.params = {
             'SIMULATIONS': 400, 
-            'C_PUCT': 1.5, 
-            'ALPHA': 0.3, 
-            'EPS': 0.25, 
+            'C_PUCT': 2.0,      # Increased from 1.5 to encourage more exploration
+            'ALPHA': 0.8,       # Increased from 0.3 to spread noise across more moves
+            'EPS': 0.3,         # Increased from 0.25 to give noise more weight
             'FPU_REDUCTION': 0.2,
             'VIRTUAL_LOSS': 3.0,
             'PARALLEL_THREADS': 16 
@@ -28,13 +28,13 @@ class MCTS:
     def search(self, board: chess.Board, is_training=False, root=None):
         self.evaluator.clear_cache()
         
-        # 1. Tree Reuse: If no root exists, create one from evaluator
         if root is None:
             priors, _ = self.evaluator.evaluate(board)
             root = MCTSNode(priors)
         
-        # 2. Dirichlet Noise (Root only)
+        # Dirichlet Noise (Critical for diversity)
         if is_training and len(root.P) > 0:
+            # High Alpha (0.8) creates a flatter distribution, forcing variety
             noise = np.random.dirichlet([self.params['ALPHA']] * len(root.P))
             for i, move in enumerate(root.P):
                 root.P[move] = (1 - self.params['EPS']) * root.P[move] + self.params['EPS'] * noise[i]
@@ -45,12 +45,10 @@ class MCTS:
         num_threads = self.params['PARALLEL_THREADS']
         root_fen = board.fen()
 
-        # 3. Multithreaded Selection with Virtual Loss
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = [executor.submit(self._run_simulation, root_fen, root) for _ in range(sim_count)]
             concurrent.futures.wait(futures)
 
-        # 4. Telemetry for Dashboard
         self.latest_depth = self.max_depth_reached
         self.latest_heatmap = {
             chess.SQUARE_NAMES[s]: round(v / sim_count, 3) 
@@ -73,7 +71,7 @@ class MCTS:
         current_turn = 'w' in fen.split()[1] 
         depth = 0
 
-        # SELECTION
+        # SELECTION (Using Virtual Loss for Parallelism)
         with self.tree_lock:
             while True:
                 move = self._select_child(node)
@@ -105,8 +103,14 @@ class MCTS:
                     node.children[move] = MCTSNode(p_priors)
         else:
             res = full_board_eval.result()
-            value = 1.0 if res == "1-0" else -1.0 if res == "0-1" else 0.0
-            if not current_turn: value = -value
+            # AlphaZero perspective: value is relative to current_turn
+            if res == "1-0":
+                val = 1.0 if current_turn else -1.0
+            elif res == "0-1":
+                val = -1.0 if current_turn else 1.0
+            else:
+                val = 0.0
+            value = val
 
         # BACKPROPAGATION
         with self.tree_lock:
@@ -132,6 +136,7 @@ class MCTS:
         for move, p_val in node.P.items():
             n_v = node.N[move]
             q_val = node.W[move] / n_v if n_v > 0 else fpu_val
+            # Upper Confidence Bound applied to Trees
             u = self.c_puct * p_val * total_n_sqrt / (1 + n_v)
             score = q_val + u
             

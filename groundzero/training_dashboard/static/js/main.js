@@ -1,17 +1,19 @@
 import { API } from './api.js';
 import { WorkerList } from './components/worker_list.js';
-import { SearchHeatmap } from './components/heatmap.js';
+import { OpeningChart } from './components/opening.js';
 import { EvalChart } from './components/eval.js';
 import { DepthChart } from './components/depth.js';
 import { PhaseChart } from './components/phase.js';
 import { LatencyChart } from './components/latency.js';
 import { EntropyChart } from './components/entropy.js';
+import { GameGallery } from './components/game_gallery.js';
 
 // Global UI State
 let activeWorkerId = "0";
 let gameHistory = [];
 let historyIndex = -1;
 let isLive = true;
+let lastUpdateMove = -1;
 
 // Setup Chessboard.js
 function pieceTheme(piece) {
@@ -28,12 +30,18 @@ const components = {
     workers: new WorkerList('worker-list', (id) => {
         activeWorkerId = id;
         isLive = true;
-        // Reset charts on worker switch for clean telemetry
+        lastUpdateMove = -1;
         Object.values(components).forEach(c => {
             if (typeof c.reset === 'function') c.reset();
         });
     }),
-    heatmap: new SearchHeatmap('heatmap-grid'),
+    gallery: new GameGallery('game-gallery', (history) => {
+        isLive = false;
+        gameHistory = history;
+        historyIndex = history.length - 1;
+        updateHistoryView();
+    }),
+    openings: new OpeningChart('openingChart'),
     evalChart: new EvalChart('evalChart'),
     depthChart: new DepthChart('depthChart'),
     phaseChart: new PhaseChart('phaseChart'),
@@ -41,7 +49,6 @@ const components = {
     entropyChart: new EntropyChart('entropyChart')
 };
 
-// History Navigation Logic
 const updateHistoryView = () => {
     if (gameHistory.length > 0 && historyIndex >= 0) {
         board.position(gameHistory[historyIndex]);
@@ -52,22 +59,17 @@ const updateHistoryView = () => {
     if (liveBtn) liveBtn.classList.toggle('active', isLive);
 };
 
+// Controls
 document.getElementById('prev-move').onclick = () => {
-    if (historyIndex > 0) {
-        historyIndex--;
-        isLive = false;
-        updateHistoryView();
-    }
+    if (historyIndex > 0) { historyIndex--; isLive = false; updateHistoryView(); }
 };
-
 document.getElementById('next-move').onclick = () => {
-    if (historyIndex < gameHistory.length - 1) {
-        historyIndex++;
+    if (historyIndex < gameHistory.length - 1) { 
+        historyIndex++; 
         if (historyIndex === gameHistory.length - 1) isLive = true;
-        updateHistoryView();
+        updateHistoryView(); 
     }
 };
-
 document.getElementById('live-view').onclick = () => {
     isLive = true;
     historyIndex = gameHistory.length - 1;
@@ -78,7 +80,6 @@ async function sync() {
     const data = await API.getStatus();
     if (!data) return;
 
-    // Global Stats
     const bufferCountEl = document.getElementById('buffer-count');
     if (bufferCountEl) bufferCountEl.innerText = data.buffer_count;
     
@@ -86,18 +87,20 @@ async function sync() {
 
     const activeStats = data.workers[activeWorkerId];
     if (activeStats) {
-        // 1. Handle History Data
-        if (activeStats.history_fens) {
-            gameHistory = activeStats.history_fens;
-            if (isLive) {
-                historyIndex = gameHistory.length - 1;
-                board.position(activeStats.fen);
-                const moveIdxEl = document.getElementById('move-idx');
-                if (moveIdxEl) moveIdxEl.innerText = `MOVE: ${historyIndex}`;
-            }
+        // 1. Gallery Update
+        if (activeStats.recent_gallery) {
+            components.gallery.render(activeStats.recent_gallery);
         }
 
-        // 2. Update Sidebar Labels (Safe update with checks)
+        // 2. History & Board
+        if (activeStats.history_fens && isLive) {
+            gameHistory = activeStats.history_fens;
+            historyIndex = gameHistory.length - 1;
+            board.position(activeStats.fen);
+            document.getElementById('move-idx').innerText = `MOVE: ${historyIndex}`;
+        }
+
+        // 3. Stats Update
         const updateText = (id, val) => {
             const el = document.getElementById(id);
             if (el) el.innerText = val !== undefined ? val : "-";
@@ -110,27 +113,26 @@ async function sync() {
         updateText('stat-games', activeStats.total_games);
         updateText('stat-samples', activeStats.total_samples);
         
-        // Value conversion from [-1, 1] to [0, 100]%
         const winProb = ((activeStats.value + 1) / 2 * 100);
         updateText('win-rate', `${winProb.toFixed(1)}%`);
 
-        // 3. Update Charts & Heatmap
-        // FIX: Check for 'Thinking' to accommodate new batched status strings
-        const isActive = activeStats.status.includes("Thinking") || activeStats.status.includes("Searching");
-        
-        if (isActive && isLive) {
+        // 4. Chart Logic
+        if (isLive && activeStats.move_count !== lastUpdateMove) {
             components.evalChart.push(winProb);
             components.depthChart.push(activeStats.last_depth);
             components.entropyChart.push(activeStats.entropy);
             components.latencyChart.push(activeStats.inference_ms);
             components.phaseChart.update(activeStats.phase_times);
+            lastUpdateMove = activeStats.move_count;
         }
         
-        if (activeStats.heatmap) {
-            components.heatmap.render(activeStats.heatmap);
+        // 5. Opening Breadth Update
+        if (activeStats.openings) {
+            components.openings.update(activeStats.openings);
         }
     }
 }
 
+// Fixed interval polling
 setInterval(sync, 1000);
 sync();

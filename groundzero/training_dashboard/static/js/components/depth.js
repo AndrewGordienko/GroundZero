@@ -2,51 +2,41 @@ export class DepthChart {
     constructor(id) {
         const ctx = document.getElementById(id).getContext('2d');
         this.chart = new Chart(ctx, {
-            type: 'bar',
+            type: 'line', // Line is better for history than Bar
             data: {
-                labels: [],
+                labels: Array(60).fill(""),
                 datasets: [{
                     label: 'Depth',
-                    data: [],
-                    backgroundColor: '#eeeeee',
-                    hoverBackgroundColor: '#111',
-                    borderWidth: 0
+                    data: Array(60).fill(0),
+                    borderColor: '#10B981', // Emerald
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    borderWidth: 2
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: false,
+                animation: { duration: 0 }, // Critical for performance
                 scales: {
                     x: { display: false },
                     y: { 
-                        beginAtZero: true,
-                        max: 30, // Adjust based on your typical MCTS depth
-                        grid: { color: '#f5f5f5' },
+                        beginAtZero: true, 
+                        max: 20, 
+                        grid: { color: 'rgba(0,0,0,0.05)' },
                         ticks: { font: { size: 9 } }
                     }
                 },
-                plugins: {
-                    legend: { display: false }
-                }
+                plugins: { legend: { display: false } }
             }
         });
     }
 
     push(val) {
-        this.chart.data.labels.push("");
         this.chart.data.datasets[0].data.push(val);
-
-        if (this.chart.data.labels.length > 60) {
-            this.chart.data.labels.shift();
-            this.chart.data.datasets[0].data.shift();
-        }
-        this.chart.update();
-    }
-
-    reset() {
-        this.chart.data.labels = [];
-        this.chart.data.datasets[0].data = [];
-        this.chart.update();
+        this.chart.data.datasets[0].data.shift();
+        this.chart.update('none');
     }
 }
