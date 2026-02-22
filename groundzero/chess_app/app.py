@@ -1,26 +1,41 @@
 import sys, os, chess, time, torch
 from flask import Flask, request, jsonify, render_template
 
-# Setup paths
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
-if root_dir not in sys.path:
-    sys.path.append(root_dir)
+# --- ROBUST PATH SETUP ---
+current_file_path = os.path.abspath(__file__)
+chess_app_dir = os.path.dirname(current_file_path)         # chess_app
+inner_gz_dir = os.path.dirname(chess_app_dir)             # groundzero (inner)
+project_root = os.path.dirname(inner_gz_dir)              # groundzero (outer/root)
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+if inner_gz_dir not in sys.path:
+    sys.path.insert(0, inner_gz_dir)
 
 from mcts.search import MCTS
-from mcts.evaluator import MaterialEvaluator # The heuristic evaluator
-from alphazero.evaluator import AlphaZeroEvaluator # The neural evaluator
+from mcts.evaluator import MaterialEvaluator 
+from groundzero.alphazero.algorithm.evaluator import AlphaZeroEvaluator 
 
 app = Flask(__name__)
 
 # --- Modular Engine Initialization ---
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-# TO SWAP: Comment out AlphaZero and uncomment MaterialEvaluator
-evaluator = AlphaZeroEvaluator(device=device) 
-# evaluator = MaterialEvaluator() 
+MODEL_PATH = os.path.join(project_root, "models", "best_model.pth")
 
+print(f"\n--- Engine Startup ---")
+print(f"Project Root: {project_root}")
+print(f"Loading Model From: {MODEL_PATH}")
+
+if not os.path.exists(MODEL_PATH):
+    print(f"CRITICAL ERROR: Model file not found at {MODEL_PATH}")
+else:
+    print(f"Model file detected. Loading on {device}...")
+
+evaluator = AlphaZeroEvaluator(model_path=MODEL_PATH, device=device) 
 engine = MCTS(evaluator)
+print(f"Engine Ready.\n")
 # -------------------------------------
 
 GLOBAL_BOARD = chess.Board()
@@ -45,7 +60,6 @@ def get_san_list():
     return out
 
 def get_common_state():
-    """Helper to package the state keys the frontend always needs."""
     u = GLOBAL_BOARD.move_stack[STATE["view"]-1] if STATE["view"] > 0 else None
     return {
         "fen": GLOBAL_BOARD.fen(),
@@ -77,7 +91,23 @@ def engine_move():
     if GLOBAL_BOARD.is_game_over():
         return jsonify({"ok": False}), 400
     
-    best_move, stats = engine.search(GLOBAL_BOARD)
+    # FIX: search.py returns (best_move, pi_dist, root)
+    best_move, pi_dist, root = engine.search(GLOBAL_BOARD)
+    
+    # Calculate stats from the root node
+    total_n = sum(root.N.values())
+    # Q values in MCTS are usually -1 to 1. We convert to 0-100% win prob.
+    # We look at the Q value of the move we chose.
+    chosen_q = root.Q.get(best_move, 0.0)
+    win_prob = (chosen_q + 1) / 2 * 100 
+
+    stats = {
+        "win_prob": round(float(win_prob), 1),
+        "simulations": int(total_n),
+        "depth": int(engine.latest_depth),
+        "top_lines": [] 
+    }
+    
     STATE["last_stats"] = stats
     return process_move(best_move.uci(), 
                         engine_eval=stats["win_prob"] / 100.0, 
@@ -95,7 +125,6 @@ def process_move(uci, engine_eval=None, engine_depth=None):
     dt = max(0.1, now - STATE["last_ts"]) if STATE["last_ts"] else 0.5
     STATE["last_ts"] = now
 
-    # Handle history truncation if user is at an old move
     if STATE["view"] < len(GLOBAL_BOARD.move_stack):
         while len(GLOBAL_BOARD.move_stack) > STATE["view"]:
             GLOBAL_BOARD.pop()
@@ -123,13 +152,10 @@ def goto():
     target = max(0, min(int(data.get("view", 0)), len(GLOBAL_BOARD.move_stack)))
     
     STATE["view"] = target
-    # Sync board for rendering correct FEN
     temp_board = chess.Board()
     for m in GLOBAL_BOARD.move_stack[:target]:
         temp_board.push(m)
     
-    # We don't pop GLOBAL_BOARD here because we want to keep history
-    # just return the common state with the temporary FEN
     res = get_common_state()
     res["fen"] = temp_board.fen()
     res["ok"] = True
