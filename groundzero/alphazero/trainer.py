@@ -5,6 +5,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import requests
+import subprocess
+import sys
 from torch.utils.data import Dataset, DataLoader
 from algorithm.model import AlphaNet
 
@@ -16,17 +19,13 @@ class ChessDataset(Dataset):
         self.refresh_files()
 
     def refresh_files(self):
-        """Scans directory for npz files and keeps track of paths."""
         if not os.path.exists(self.buffer_path):
             return
-        # Get newest files first
         all_files = sorted(glob.glob(os.path.join(self.buffer_path, "*.npz")), 
                           key=os.path.getmtime, reverse=True)
         
-        # We only keep enough files to cover our max_samples roughly
-        self.file_list = all_files[:200] # Adjust based on average batch size per file
+        self.file_list = all_files[:200]
         
-        # Pre-load data to keep training fast
         self.states, self.pis, self.zs = [], [], []
         total_samples = 0
         for f in self.file_list:
@@ -55,10 +54,11 @@ class ChessDataset(Dataset):
         )
 
 class AlphaTrainer:
-    def __init__(self, model_path, buffer_path, device="cpu"):
+    def __init__(self, model_path, buffer_path, device="cpu", dashboard_url="http://localhost:5005"):
         self.model_path = os.path.abspath(model_path)
         self.buffer_path = buffer_path
         self.device = device
+        self.dashboard_url = dashboard_url
         self.dataset = ChessDataset(self.buffer_path)
         
         self.model = AlphaNet(num_res_blocks=10, channels=128).to(self.device)
@@ -70,20 +70,31 @@ class AlphaTrainer:
         self.mse_loss = nn.MSELoss()
         self.ce_loss = nn.CrossEntropyLoss()
 
+    def report_metrics(self, p_loss, v_loss):
+        try:
+            payload = {
+                "p_loss": float(p_loss),
+                "v_loss": float(v_loss),
+                "lr": self.optimizer.param_groups[0]['lr'],
+                "buffer_size": len(self.dataset)
+            }
+            requests.post(f"{self.dashboard_url}/api/update", json=payload, timeout=0.5)
+        except:
+            pass 
+
     def train_step(self, batch_size=1024, epochs=3):
         start_load = time.time()
         self.dataset.refresh_files()
         
         if len(self.dataset) < 2000:
-            print(f" [!] Buffer: {len(self.dataset)}/2000 | Awaiting more data...")
+            print(f" [!] Buffer: {len(self.dataset)}/2000 | Awaiting data...")
             return False
 
-        # Speed up: num_workers and pin_memory for faster Apple Silicon / GPU throughput
         loader = DataLoader(
             self.dataset, 
             batch_size=batch_size, 
             shuffle=True, 
-            num_workers=0, # Set to 0 for MPS stability, or 4 for CUDA
+            num_workers=0, 
             pin_memory=True if self.device != "cpu" else False
         )
         
@@ -110,26 +121,38 @@ class AlphaTrainer:
                 p_losses.append(loss_p.item())
                 v_losses.append(loss_v.item())
 
-            print(f" > Epoch {epoch+1}/{epochs} | Policy: {np.mean(p_losses):.4f} | Value: {np.mean(v_losses):.4f} | {time.time()-epoch_start:.1f}s")
+            avg_p, avg_v = np.mean(p_losses), np.mean(v_losses)
+            print(f" > Epoch {epoch+1}/{epochs} | Policy: {avg_p:.4f} | Value: {avg_v:.4f} | {time.time()-epoch_start:.1f}s")
+            self.report_metrics(avg_p, avg_v)
         
         torch.save(self.model.state_dict(), self.model_path)
         print(f"[*] Weights Synchronized. {'-'*31}")
         return True
 
 if __name__ == "__main__":
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
+    # Resolve Paths based on your screenshot structure
+    script_dir = os.path.dirname(os.path.abspath(__file__)) # groundzero/alphazero/
+    project_root = os.path.dirname(os.path.dirname(script_dir)) # GROUNDZERO/
     
-    MODEL_PATH = os.path.join(os.path.dirname(script_dir), "models", "best_model.pth")
+    MODEL_PATH = os.path.join(project_root, "models", "best_model.pth")
     BUFFER_PATH = os.path.join(project_root, "data", "replay_buffer")
+    DASHBOARD_SCRIPT = os.path.join(project_root, "groundzero", "network_dashboard", "app.py")
 
     DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
-    trainer = AlphaTrainer(MODEL_PATH, BUFFER_PATH, DEVICE)
-    
-    print(f"[*] AlphaZero Trainer Active [{DEVICE}]")
 
-    while True:
-        if trainer.train_step():
-            time.sleep(30) # Train more frequently if data is flowing
-        else:
-            time.sleep(10)
+    # Launch Dashboard Process
+    print(f"[*] Starting Dashboard from: {DASHBOARD_SCRIPT}")
+    dashboard_proc = subprocess.Popen([sys.executable, DASHBOARD_SCRIPT])
+
+    try:
+        trainer = AlphaTrainer(MODEL_PATH, BUFFER_PATH, DEVICE)
+        print(f"[*] AlphaZero Trainer Active [{DEVICE}]")
+
+        while True:
+            if trainer.train_step():
+                time.sleep(30)
+            else:
+                time.sleep(10)
+    except KeyboardInterrupt:
+        print("\n[*] Shutting down Trainer and Dashboard...")
+        dashboard_proc.terminate()
