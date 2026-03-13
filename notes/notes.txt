@@ -2,3 +2,4 @@
 [ ] start - end
 [ ] embed llm
 
+notes update and username
