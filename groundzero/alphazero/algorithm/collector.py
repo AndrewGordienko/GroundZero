@@ -4,14 +4,19 @@ import torch
 import os
 import time
 from collections import Counter, deque
-from algorithm.evaluator import AlphaZeroEvaluator
-from mcts.search import MCTS
+from groundzero.alphazero.algorithm.evaluator import AlphaZeroEvaluator
+from groundzero.mcts.search import MCTS
 
 class DataCollector:
     def __init__(self, model_path=None, device="cpu"):
+        # Fix: Ensure we use absolute paths to prevent duplicate data/model folders
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
         self.evaluator = AlphaZeroEvaluator(model_path=model_path, device=device)
         self.engine = MCTS(self.evaluator)
-        self.buffer_path = "data/replay_buffer/"
+        
+        # Absolute path for replay buffer
+        self.buffer_path = os.path.join(self.base_dir, "data", "replay_buffer")
         os.makedirs(self.buffer_path, exist_ok=True)
         
         # --- Exploration Hyperparameters ---
@@ -28,11 +33,15 @@ class DataCollector:
         self.recent_phase_window = deque(maxlen=20) 
 
     def update_model(self, path):
+        """Reloads the model weights if the file exists."""
         if os.path.exists(path):
             try:
-                self.evaluator.model.load_state_dict(torch.load(path, map_location=self.evaluator.device))
+                # Use weights_only for security and map to correct device
+                state_dict = torch.load(path, map_location=self.evaluator.device, weights_only=True)
+                self.evaluator.model.load_state_dict(state_dict)
                 self.evaluator.model.eval()
-            except: pass 
+            except Exception as e:
+                print(f"[Collector] Error updating model: {e}")
 
     def collect_game(self, worker_id=None, stats=None):
         board = chess.Board()
@@ -62,7 +71,8 @@ class DataCollector:
                 root = None 
             else:
                 if move_count < temp_threshold:
-                    moves = list(pi_dist.keys()); probs = list(pi_dist.values())
+                    moves = list(pi_dist.keys())
+                    probs = list(pi_dist.values())
                     selected_move = np.random.choice(moves, p=probs)
                 else:
                     selected_move = max(pi_dist, key=pi_dist.get)
@@ -79,9 +89,7 @@ class DataCollector:
             this_game_phase[phase] += search_duration
             self.all_time_phase[phase] += search_duration
 
-            # --- VALUE HEAD FIX ---
-            # Map Tanh (-1 to 1) to Probability (0 to 1). 
-            # 0.0 becomes 0.5 (50%), 1.0 becomes 1.0 (100%), -1.0 becomes 0.0 (0%)
+            # Value Mapping
             raw_val = float(self.evaluator.latest_value)
             win_prob = (raw_val + 1) / 2 
             value_history.append(raw_val)
@@ -91,11 +99,12 @@ class DataCollector:
                 for g in self.recent_phase_window:
                     for k in window_sum: window_sum[k] += g[k]
 
+                # Using .get() for dict safety in multiprocessing
                 stats[worker_id] = {
                     "status": "Thinking" if not (is_forced_exploration and move_count < self.FORCE_RANDOM_PLIES) else "Exploring",
                     "move_count": move_count,
-                    "last_depth": int(self.engine.latest_depth),
-                    "value": round(win_prob, 3), # Sends 0.500 instead of 50.0
+                    "last_depth": int(getattr(self.engine, 'latest_depth', 0)),
+                    "value": round(win_prob, 3),
                     "entropy": float(-np.sum(np.array(list(pi_dist.values())) * np.log2(np.array(list(pi_dist.values())) + 1e-9))),
                     "inference_ms": float(self.evaluator.last_inference_time * 1000),
                     "fen": board.fen(),
@@ -123,10 +132,11 @@ class DataCollector:
         res_str = board.result() if board.is_game_over() else "1/2-1/2"
         outcome = 1.0 if res_str == "1-0" else -1.0 if res_str == "0-1" else 0.0
         
-        # Interest score for Hall of Fame
+        # Hall of Fame Logic
         val_arr = np.array(value_history)
         swings = np.abs(np.diff(val_arr)).sum() if len(val_arr) > 1 else 0
         interest_score = swings + (move_count / 100.0) + (5 if res_str != "1/2-1/2" else 0)
+        
         self.hall_of_fame.append({
             "id": f"G{self.total_games}", 
             "result": res_str, 
@@ -138,9 +148,11 @@ class DataCollector:
 
         self.total_games += 1
         self.total_samples += len(game_data)
+        
         return [{"state": s["state"], "pi": s["pi"], "z": float(outcome if s["turn"] == chess.WHITE else -outcome)} for s in game_data]
 
     def save_batch(self, game_data, filename):
+        # Uses the absolute buffer_path defined in __init__
         path = os.path.join(self.buffer_path, filename)
         np.savez_compressed(
             path, 

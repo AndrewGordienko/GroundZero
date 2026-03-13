@@ -1,75 +1,73 @@
 import os
+import sys
 import time
 import torch
 import multiprocessing as mp
-import sys
-import uuid
 
-# Setup paths
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
-if root_dir not in sys.path:
-    sys.path.append(root_dir)
+current_file = os.path.abspath(__file__)
+# Path logic: run_actors.py -> alphazero -> groundzero -> [ROOT]
+# This ensures groundzero is importable no matter where you run from.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 
-from algorithm.model import AlphaNet
-from algorithm.collector import DataCollector
-from algorithm.inference_server import inference_worker
-from training_dashboard.dashboard_app import run_dashboard_server
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# ==============================================================
+# 2. IMPORTS (Now using absolute package paths)
+# ==============================================================
+from groundzero.alphazero.algorithm.model import AlphaNet
+from groundzero.alphazero.algorithm.collector import DataCollector
+from groundzero.alphazero.algorithm.inference_server import inference_worker
+
+# If you want the dashboard, uncomment and ensure path is correct
+# from groundzero.training_dashboard.dashboard_app import run_dashboard_server 
 
 def bootstrap_model(path):
+    """Initializes model weights if they don't exist."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     if not os.path.exists(path):
         print(f"[*] Initializing new 'brain' at {path}...")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         model = AlphaNet(num_res_blocks=10, channels=128)
         torch.save(model.state_dict(), path)
 
 def worker_task(worker_id, model_path, shared_stats, task_queue, result_dict):
-    """
-    Worker process. Note: It no longer loads the model itself.
-    It passes the task_queue to the evaluator.
-    """
-    # M1 Mac Optimization: The collector uses the CPU for MCTS logic, 
-    # but the evaluator sends requests to the GPU process via queues.
+    """Process for generating self-play games."""
+    # M1/M2/M3 Mac Optimization: Keep MCTS on CPU, send work to GPU via Queue
     collector = DataCollector(model_path=model_path, device="cpu")
-    
-    # Inject the batching queues into the evaluator
     collector.evaluator.set_batch_mode(task_queue, result_dict)
 
     print(f"[Worker {worker_id}] Starting batched self-play...")
     
     while True:
         shared_stats[worker_id] = {
-            "status": "In Queue",
-            "move_count": 0,
-            "fen": "start",
-            "start_time": time.time()
+            "status": "In Queue", "move_count": 0, "fen": "start", "start_time": time.time()
         }
 
         start_time = time.time()
+        # collect_game handles the actual MCTS and board logic
         game_data = collector.collect_game(worker_id=worker_id, stats=shared_stats)
-        duration = time.time() - start_time
         
         timestamp = int(time.time() * 1000)
         filename = f"batch_{worker_id}_{timestamp}.npz"
         collector.save_batch(game_data, filename)
         
-        print(f"[Worker {worker_id}] Game finished ({duration:.1f}s). Buffer: {len(game_data)}")
-        
-        # In batch mode, the inference server reloads the model, 
-        # so workers don't need to update locally as often.
+        # Periodically check for new weight files
         collector.update_model(model_path)
 
 if __name__ == "__main__":
-    mp.set_start_method('spawn', force=True) # Required for MPS/GPU on Mac
+    # REQUIRED for Mac MPS (Metal) and Multi-process safety
+    mp.set_start_method('spawn', force=True) 
     
-    MODEL_PATH = "models/best_model.pth"
+    # Use PROJECT_ROOT to ensure folders go to the very top directory
+    MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "best_model.pth")
     DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
     
     bootstrap_model(MODEL_PATH)
     
+    # Manager handles shared memory between workers and the GPU server
     with mp.Manager() as manager:
         shared_stats = manager.dict()
-        result_dict = manager.dict() # Stores (probs, value) keyed by request_id
+        result_dict = manager.dict() 
         task_queue = mp.Queue(maxsize=256)
         processes = []
 
@@ -81,12 +79,7 @@ if __name__ == "__main__":
         inf_p.start()
         processes.append(inf_p)
 
-        # 2. Start Dashboard
-        dashboard_p = mp.Process(target=run_dashboard_server, args=(shared_stats,))
-        dashboard_p.start()
-        processes.append(dashboard_p)
-
-        # 3. Start Workers
+        # 2. Start Workers (Self-play actors)
         num_workers = 8
         for i in range(num_workers):
             p = mp.Process(
@@ -97,6 +90,8 @@ if __name__ == "__main__":
             processes.append(p)
 
         try:
+            print(f"[*] All actors running on {DEVICE}. Press Ctrl+C to stop.")
             for p in processes: p.join()
         except KeyboardInterrupt:
+            print("\n[!] Shutting down processes...")
             for p in processes: p.terminate()

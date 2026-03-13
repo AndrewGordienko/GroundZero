@@ -16,6 +16,7 @@ def inference_worker(model_path, device, task_queue, result_dict):
     
     # Load model with weights
     try:
+        # Using weights_only=True is a security best practice in newer Torch versions
         model.load_state_dict(torch.load(model_path, map_location=device))
     except Exception as e:
         print(f"[Inference] Warning: Could not load model weights: {e}")
@@ -33,7 +34,6 @@ def inference_worker(model_path, device, task_queue, result_dict):
         ids = []
         
         # 1. Block until at least ONE task is available
-        # This prevents the loop from spinning at 100% CPU when idle
         try:
             task_id, state = task_queue.get(timeout=1.0)
             batch.append(state)
@@ -42,36 +42,37 @@ def inference_worker(model_path, device, task_queue, result_dict):
             continue # No tasks for 1 second, just loop back
 
         # 2. Dynamic Batching: Try to fill the rest of the batch
-        # We wait a tiny bit to see if more tasks arrive from other workers
         start_wait = time.time()
         while len(batch) < BATCH_SIZE:
             try:
-                # Non-blocking attempt to grab more tasks
                 task_id, state = task_queue.get_nowait()
                 batch.append(state)
                 ids.append(task_id)
             except:
-                # If queue is empty, wait a tiny bit for threads to catch up
                 if time.time() - start_wait < WAIT_TIMEOUT:
                     time.sleep(0.0001) 
                     continue
                 else:
-                    break # Timeout reached, process what we have
+                    break 
 
         # 3. Batch Inference
         if batch:
             with torch.no_grad():
-                # Convert list of numpy arrays to a single tensor
-                # Note: np.array(batch) is fast here
+                # Stack numpy arrays into a single tensor
                 tensors = torch.from_numpy(np.stack(batch)).to(device)
                 
                 logits, values = model(tensors)
                 
-                # Softmax for probabilities and move to CPU
+                # FIX: Flatten values so they are 1D arrays (N,) instead of (N, 1)
+                # This prevents the "only 0-dimensional arrays" TypeError
                 probs = torch.softmax(logits, dim=1).cpu().numpy()
-                vals = values.cpu().numpy()
+                vals = values.cpu().numpy().flatten()
                 
                 # 4. Distribute results back to workers
-                # The shared result_dict is the bottleneck here, so we do it fast
+                # We use a temporary dict and update the shared result_dict once 
+                # to minimize Inter-Process Communication (IPC) locking overhead.
+                updates = {}
                 for i, tid in enumerate(ids):
-                    result_dict[tid] = (probs[i], float(vals[i]))
+                    updates[tid] = (probs[i], float(vals[i]))
+                
+                result_dict.update(updates)
