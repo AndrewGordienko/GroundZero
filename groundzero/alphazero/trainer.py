@@ -8,15 +8,19 @@ import torch.optim as optim
 import numpy as np
 import requests
 import subprocess
+import logging
 from torch.utils.data import Dataset, DataLoader
 
 # ==============================================================
-# SMART PATH FIX
+# 1. SILENCE EXTERNAL NOISE
 # ==============================================================
-current_file = os.path.abspath(__file__)
-# trainer.py (0) -> alphazero (1) -> groundzero (2) -> ROOT (3)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+logging.getLogger('werkzeug').disabled = True
+logging.getLogger('requests').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
 
+# --- Path Fix ---
+current_file = os.path.abspath(__file__)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -26,128 +30,108 @@ class ChessDataset(Dataset):
     def __init__(self, buffer_path, max_samples=100000):
         self.buffer_path = os.path.abspath(buffer_path)
         self.max_samples = max_samples
-        self.file_list = []
         self.states, self.pis, self.zs = [], [], []
         self.refresh_files()
 
     def refresh_files(self):
-        if not os.path.exists(self.buffer_path):
-            return
-            
+        if not os.path.exists(self.buffer_path): return
         all_files = sorted(glob.glob(os.path.join(self.buffer_path, "*.npz")), 
                           key=os.path.getmtime, reverse=True)
-        
         self.file_list = all_files[:1000]
-        temp_states, temp_pis, temp_zs = [], [], []
-        total_samples = 0
-        
+        t_s, t_p, t_z = [], [], []
+        total = 0
         for f in self.file_list:
             try:
                 with np.load(f) as data:
-                    temp_states.append(data['states'])
-                    temp_pis.append(data['pis'])
-                    temp_zs.append(data['zs'])
-                    total_samples += len(data['zs'])
-                if total_samples >= self.max_samples: break
+                    t_s.append(data['states']); t_p.append(data['pis']); t_z.append(data['zs'])
+                    total += len(data['zs'])
+                if total >= self.max_samples: break
             except: continue
-            
-        if temp_states:
-            self.states = np.concatenate(temp_states, axis=0)
-            self.pis = np.concatenate(temp_pis, axis=0)
-            self.zs = np.concatenate(temp_zs, axis=0)
+        if t_s:
+            self.states = np.concatenate(t_s)
+            self.pis = np.concatenate(t_p)
+            self.zs = np.concatenate(t_z)
         else:
             self.states, self.pis, self.zs = [], [], []
 
-    def __len__(self):
-        return len(self.zs) if len(self.zs) > 0 else 0
-
+    def __len__(self): return len(self.zs) if len(self.zs) > 0 else 0
     def __getitem__(self, idx):
-        return (
-            torch.from_numpy(self.states[idx]).float(),
-            torch.from_numpy(self.pis[idx]).float(),
-            torch.tensor(self.zs[idx]).float()
-        )
+        return torch.from_numpy(self.states[idx]).float(), \
+               torch.from_numpy(self.pis[idx]).float(), \
+               torch.tensor(self.zs[idx]).float()
 
 class AlphaTrainer:
     def __init__(self, model_path, buffer_path, device="cpu", dashboard_url="http://localhost:5005"):
-        self.model_path = model_path
-        self.buffer_path = buffer_path
-        self.device = device
-        self.dashboard_url = dashboard_url
+        self.model_path, self.buffer_path = model_path, buffer_path
+        self.device, self.dashboard_url = device, dashboard_url
         self.dataset = ChessDataset(self.buffer_path)
         
         self.model = AlphaNet(num_res_blocks=10, channels=128).to(self.device)
         if os.path.exists(self.model_path):
-            print(f"[*] Reloading Weights: {os.path.basename(self.model_path)}")
             self.model.load_state_dict(torch.load(self.model_path, map_location=self.device, weights_only=True))
         
+        # AdamW with specific weight decay helps prevent the "Zero Value Loss" lazy learning
         self.optimizer = optim.AdamW(self.model.parameters(), lr=0.001, weight_decay=1e-4)
-        self.mse_loss = nn.MSELoss()
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.mse_loss, self.ce_loss = nn.MSELoss(), nn.CrossEntropyLoss()
 
-    def report_metrics(self, p_loss, v_loss):
-        try:
-            payload = {
-                "p_loss": float(p_loss),
-                "v_loss": float(v_loss),
-                "lr": self.optimizer.param_groups[0]['lr'],
-                "buffer_size": len(self.dataset)
-            }
-            requests.post(f"{self.dashboard_url}/api/update", json=payload, timeout=0.5)
-        except: pass 
-
-    def train_step(self, batch_size=1024, epochs=3):
+    def train_step(self, batch_size=512, epochs=3):
         self.dataset.refresh_files()
-        current_samples = len(self.dataset)
-        
-        if current_samples < 2000:
-            print(f" [!] Buffer: {current_samples}/2000 | Files: {len(self.dataset.file_list)} | Awaiting data...")
+        if len(self.dataset) < 2000:
+            print(f"\r [!] Buffer: {len(self.dataset)}/2000 | Awaiting data...", end="")
             return False
 
         loader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
-        print(f"\n ENGINE UPDATE | Samples: {current_samples}")
+        print(f"\n{'-'*60}\n ENGINE UPDATE | Samples: {len(self.dataset)} | Device: {self.device}\n{'-'*60}")
+        
         self.model.train()
-
         for epoch in range(epochs):
-            p_losses, v_losses = [], []
-            for states, pis, zs in loader:
-                states, pis, zs = states.to(self.device), pis.to(self.device), zs.to(self.device)
+            p_ls, v_ls = [], []
+            t0 = time.time()
+            for i, (s, p, z) in enumerate(loader):
+                s, p, z = s.to(self.device), p.to(self.device), z.to(self.device)
+                
                 self.optimizer.zero_grad()
-                p_logits, v = self.model(states)
-                loss_v = self.mse_loss(v.view(-1), zs)
-                loss_p = self.ce_loss(p_logits, pis)
+                p_logits, v = self.model(s)
+                
+                # Standard AlphaZero Loss: (z - v)^2 - pi * log(p)
+                loss_v = self.mse_loss(v.view(-1), z)
+                loss_p = self.ce_loss(p_logits, p)
+                
                 (loss_v + loss_p).backward()
                 self.optimizer.step()
-                p_losses.append(loss_p.item()); v_losses.append(loss_v.item())
+                
+                p_ls.append(loss_p.item()); v_ls.append(loss_v.item())
 
-            print(f" > Epoch {epoch+1}/{epochs} | Policy: {np.mean(p_losses):.4f} | Value: {np.mean(v_losses):.4f}")
-            self.report_metrics(np.mean(p_losses), np.mean(v_losses))
+                if i % 10 == 0:
+                    prog = (i / len(loader)) * 100
+                    print(f"\r  > Epoch {epoch+1} | {prog:4.1f}% | P-Loss: {loss_p.item():.4f} | V-Loss: {loss_v.item():.4f}", end="")
+
+            avg_p, avg_v = np.mean(p_ls), np.mean(v_ls)
+            print(f"\n [+] Epoch {epoch+1} | Avg P: {avg_p:.4f} | Avg V: {avg_v:.4f} | {time.time()-t0:.1f}s")
+            
+            try: requests.post(f"{self.dashboard_url}/api/update", 
+                               json={"p_loss": float(avg_p), "v_loss": float(avg_v), "lr": 0.001, "buffer_size": len(self.dataset)}, 
+                               timeout=0.1)
+            except: pass
         
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
         torch.save(self.model.state_dict(), self.model_path)
-        print(f"[*] Weights Synchronized.")
+        print(f"[*] Weights Synchronized.\n")
         return True
 
 if __name__ == "__main__":
-    # FIX: Adding 'groundzero' to the path to match your actual folder structure
-    BUFFER_PATH = os.path.join(PROJECT_ROOT, "groundzero", "data", "replay_buffer")
-    MODEL_PATH = os.path.join(PROJECT_ROOT, "groundzero", "models", "best_model.pth")
-    
-    DASHBOARD_SCRIPT = os.path.join(PROJECT_ROOT, "groundzero", "network_dashboard", "app.py")
-    
-    DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
+    B_PATH = os.path.join(PROJECT_ROOT, "groundzero", "data", "replay_buffer")
+    M_PATH = os.path.join(PROJECT_ROOT, "groundzero", "models", "best_model.pth")
+    D_SCRIPT = os.path.join(PROJECT_ROOT, "groundzero", "network_dashboard", "app.py")
+    DEV = "mps" if torch.backends.mps.is_available() else "cpu"
 
-    print(f"[*] Starting Trainer...")
-    print(f"[*] Searching for samples in: {BUFFER_PATH}")
-
-    dashboard_proc = subprocess.Popen([sys.executable, DASHBOARD_SCRIPT])
+    print(f"[*] Starting Silent AlphaZero Stack...")
+    db_p = subprocess.Popen([sys.executable, D_SCRIPT], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     try:
-        trainer = AlphaTrainer(MODEL_PATH, BUFFER_PATH, DEVICE)
+        tr = AlphaTrainer(M_PATH, B_PATH, DEV)
         while True:
-            if trainer.train_step(): 
-                time.sleep(30)
-            else: 
-                time.sleep(10)
+            if tr.train_step(batch_size=512): time.sleep(30)
+            else: time.sleep(10)
     except KeyboardInterrupt:
-        print("\n[!] Shutting down...")
-        dashboard_proc.terminate()
+        db_p.terminate()

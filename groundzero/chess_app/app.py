@@ -3,39 +3,46 @@ from flask import Flask, request, jsonify, render_template
 
 # --- ROBUST PATH SETUP ---
 current_file_path = os.path.abspath(__file__)
-chess_app_dir = os.path.dirname(current_file_path)         # chess_app
-inner_gz_dir = os.path.dirname(chess_app_dir)             # groundzero (inner)
-project_root = os.path.dirname(inner_gz_dir)              # groundzero (outer/root)
+chess_app_dir = os.path.dirname(current_file_path)         # groundzero/chess_app
+inner_gz_dir = os.path.dirname(chess_app_dir)             # groundzero/groundzero
+project_root = os.path.dirname(inner_gz_dir)              # groundzero (root)
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# We need the inner directory for the package imports to resolve correctly
 if inner_gz_dir not in sys.path:
     sys.path.insert(0, inner_gz_dir)
 
-from mcts.search import MCTS
-from mcts.evaluator import MaterialEvaluator 
+from groundzero.mcts.search import MCTS
 from groundzero.alphazero.algorithm.evaluator import AlphaZeroEvaluator 
 
 app = Flask(__name__)
 
-# --- Modular Engine Initialization ---
-device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+# --- ENGINE INITIALIZATION ---
+device = "mps" if torch.backends.mps.is_available() else "cpu"
 
-MODEL_PATH = os.path.join(project_root, "models", "best_model.pth")
+# ALIGNMENT FIX: Pointing to the specific models folder inside the package
+MODEL_PATH = os.path.join(inner_gz_dir, "models", "best_model.pth")
 
-print(f"\n--- Engine Startup ---")
-print(f"Project Root: {project_root}")
-print(f"Loading Model From: {MODEL_PATH}")
+print(f"\n" + "="*50)
+print(f"  CHESS INTERFACE STARTUP")
+print(f"="*50)
+print(f"[*] Target Model: {MODEL_PATH}")
 
 if not os.path.exists(MODEL_PATH):
-    print(f"CRITICAL ERROR: Model file not found at {MODEL_PATH}")
+    print(f"[!] WARNING: {MODEL_PATH} not found.")
+    print(f"    Ensure you have run the trainer.py at least once!")
 else:
-    print(f"Model file detected. Loading on {device}...")
+    print(f"[*] Model detected. Initializing AlphaZero Evaluator on {device}...")
 
+# Initialize Engine
 evaluator = AlphaZeroEvaluator(model_path=MODEL_PATH, device=device) 
 engine = MCTS(evaluator)
-print(f"Engine Ready.\n")
+print(f"[*] Engine Ready to Play.\n")
+
+# -------------------------------------
+# REST OF YOUR FLASK LOGIC
 # -------------------------------------
 
 GLOBAL_BOARD = chess.Board()
@@ -91,13 +98,10 @@ def engine_move():
     if GLOBAL_BOARD.is_game_over():
         return jsonify({"ok": False}), 400
     
-    # FIX: search.py returns (best_move, pi_dist, root)
+    # MCTS returns (best_move, pi_dist, root)
     best_move, pi_dist, root = engine.search(GLOBAL_BOARD)
     
-    # Calculate stats from the root node
     total_n = sum(root.N.values())
-    # Q values in MCTS are usually -1 to 1. We convert to 0-100% win prob.
-    # We look at the Q value of the move we chose.
     chosen_q = root.Q.get(best_move, 0.0)
     win_prob = (chosen_q + 1) / 2 * 100 
 
